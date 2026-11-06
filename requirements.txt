@@ -1,0 +1,4 @@
+selenium>=4.25
+requests>=2.32
+PyYAML>=6.0
+pytest>=8.0

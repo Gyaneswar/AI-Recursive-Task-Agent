@@ -1,0 +1,57 @@
+personal:
+  first_name: Jane
+  last_name: Doe
+  email: jane.doe@example.com
+  phone: "+00 0000000000"
+  linkedin: https://linkedin.com/in/your-handle
+  github: https://github.com/your-handle
+  current_location: "City, State, Country"
+  resume_pdf: C:/path/to/your_resume.pdf
+
+preferences:
+  target_roles: [Software Engineer, Backend Engineer]
+  remote_ok: true
+  willing_to_relocate: "remote"
+  notice_period: "30 days"
+  current_ctc: ""
+  expected_ctc: ""
+  whatsapp_sms_marketing_opt_in: "no"
+
+work_authorization:
+  authorized_countries: [Country]
+  needs_sponsorship_for_jobs_in_india: "no"
+  needs_sponsorship_for_jobs_outside_india: "no"
+
+summary: >
+  One or two lines summarising your role, years of experience, core stack and past employers.
+
+total_experience_years: 0
+
+skills: [Skill1, Skill2, Skill3]
+
+experience:
+  - company: Company A
+    title: Your Title
+    start: YYYY-MM
+    end: present
+    location: Remote
+    highlights:
+      - Quantified achievement or responsibility
+      - Another highlight
+  - company: Company B
+    title: Your Title
+    start: YYYY-MM
+    end: YYYY-MM
+    location: City
+    highlights:
+      - Quantified achievement or responsibility
+
+projects:
+  - Short project description
+
+education:
+  degree: Degree, Major
+  school: University Name
+  cgpa: 0.0
+  start: YYYY
+  end: YYYY

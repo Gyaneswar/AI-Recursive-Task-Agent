@@ -1,0 +1,82 @@
+profile: profile.yaml
+dry_run: false
+
+llm:
+  base_url: http://localhost:1234/v1
+  model: google/gemma-4-e4b
+  api_key: local
+  temperature: 0.1
+  timeout: 180
+  json_mode: false
+  reasoning_effort: "none"
+
+browser:
+  debugger_address: 127.0.0.1:9222
+  kind: edge
+
+thresholds:
+  min_match_score: 70
+  min_answer_confidence: 0.75
+
+limits:
+  max_applications_per_run: 7
+  linkedin_daily_cap: 25
+  max_submissions_per_day: 40
+  max_per_company: 2
+  delay_seconds: [4, 10]
+
+filters:
+  title_include: []
+  title_exclude: [intern, principal, staff, manager, frontend, ios, android, sales, designer, marketing, new grad]
+  locations: [remote]
+  remote_exclude: [us, usa, united states, canada, uk, united kingdom, europe, emea, americas, latam, mexico, brazil,
+                   germany, ireland, france, netherlands, spain, poland, australia, japan, singapore]
+  require_remote_worldwide: true
+  allow_unknown_scope: true
+  pay_currencies: [USD, INR, EUR, UNKNOWN]
+  allow_unknown_pay: true
+
+web_search:
+  enabled: true
+  verify_scopes: [unknown, restricted]
+  query: '"{company}" remote jobs hire from anywhere worldwide countries'
+  max_chars: 4000
+
+schedule:
+  interval_minutes: 60
+
+discovery:
+  feeds: [remotive, remoteok, himalayas, jobicy, wwr]
+  keywords: [java, backend, spring, kotlin]
+  title_any: [java, backend, back-end, back end, software engineer, software developer, sde, platform engineer,
+              kotlin, spring, distributed, microservices, api engineer, full stack, fullstack]
+  eligible_regions: [india, asia, apac]
+  board_poll_hours: 6
+  probe_per_run: 30
+  search_every_hours: 24
+  search_url: 'https://html.duckduckgo.com/html/?q={q}'
+  search_queries:
+    - 'site:jobs.lever.co java backend remote'
+    - 'site:jobs.lever.co remote worldwide engineer'
+    - 'site:job-boards.greenhouse.io java remote anywhere'
+    - 'site:boards.greenhouse.io java backend remote'
+    - 'site:jobs.ashbyhq.com java backend remote'
+    - 'site:jobs.ashbyhq.com remote worldwide engineer'
+
+sources:
+  greenhouse_boards: []
+  lever_companies: [paytm, meesho]
+  ashby_boards: []
+  linkedin_pages: 3
+  linkedin_search:
+    keywords: [java]
+    location: india
+    posted_within_hours: 24
+    easy_apply_only: false
+    remote_only: true
+  linkedin_search_urls: []
+
+paths:
+  db: data/jobbot.db
+  manual_list: data/manual_apply.txt
+  screenshots: data/screenshots
