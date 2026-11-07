@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import yaml
 
 from ..skills import load_skill
+from .memory import format_hits
 from .web import http_text
 
 PAGE_JS = "return [document.title, document.body ? document.body.innerText : ''];"
@@ -57,7 +58,7 @@ def _check_url(url: str) -> str:
     return str(url)
 
 
-def builtin_tools(ctx, skills: list[str] = ()) -> list[Tool]:
+def builtin_tools(ctx, skills: list[str] = (), memory=None) -> list[Tool]:
     def web_search(query):
         return ctx.search.search(str(query))
 
@@ -94,6 +95,12 @@ def builtin_tools(ctx, skills: list[str] = ()) -> list[Tool]:
             params = yaml.safe_load(params) if params.strip() else {}
         return ctx.run_skill(name, params if isinstance(params, dict) else {})
 
+    def remember(text, tags=""):
+        return f"stored memory {memory.add(str(text), source='agent', task=ctx.current_task, tags=tags)}"
+
+    def recall(query, k=5):
+        return format_hits(memory.search(str(query), int(k)))
+
     tools = [
         Tool("web_search", "Search the web; returns result links and snippets.", {"query": "search terms"}, web_search),
         Tool("open_page", "Open a URL in the logged-in browser (JavaScript sites) and return its visible text.",
@@ -105,6 +112,13 @@ def builtin_tools(ctx, skills: list[str] = ()) -> list[Tool]:
              {"path": "relative path", "content": "text", "append": "true to append (optional)"}, write_file),
         Tool("list_files", "List files in the workspace.", {}, list_files),
     ]
+    if memory is not None:
+        tools += [
+            Tool("remember", "Save a fact or finding to long-term memory so later runs can find it.",
+                 {"text": "self-contained fact", "tags": "comma-separated tags (optional)"}, remember),
+            Tool("recall", "Semantic search of long-term memory (facts saved earlier, ingested documents).",
+                 {"query": "what to look for", "k": "number of results (optional)"}, recall),
+        ]
     if skills:
         desc = "; ".join(f"{s}: {load_skill(s).description}" for s in skills)
         tools.append(Tool("run_skill", f"Run a built-in skill and return its summary. Skills -> {desc}",
@@ -112,7 +126,7 @@ def builtin_tools(ctx, skills: list[str] = ()) -> list[Tool]:
     return tools
 
 
-def make_toolbox(ctx, cfg: dict) -> Toolbox:
+def make_toolbox(ctx, cfg: dict, memory=None) -> Toolbox:
     allowed = cfg.get("tools")
-    tools = builtin_tools(ctx, list(cfg.get("skills") or []))
+    tools = builtin_tools(ctx, list(cfg.get("skills") or []), memory)
     return Toolbox([t for t in tools if allowed is None or t.name in allowed or t.name == "run_skill"])

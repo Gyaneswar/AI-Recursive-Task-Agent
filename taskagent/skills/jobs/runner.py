@@ -45,6 +45,10 @@ def run(ctx, cfg: dict, profile: dict, sources: list[str], discover_only: bool =
         adapter = ADAPTERS[name](cfg, profile, llm, driver)
         submitted = 0
         for job in adapter.discover():
+            if ctx.should_stop():
+                print("[jobs] stop requested")
+                stats["stopped"] += 1
+                return stats
             if submitted >= limits["max_applications_per_run"]:
                 print(f"[{name}] reached max_applications_per_run")
                 break

@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
 );
 CREATE INDEX IF NOT EXISTS task_runs_task ON task_runs (task, id);
 CREATE TABLE IF NOT EXISTS llm_cache (key TEXT PRIMARY KEY, response TEXT, created_at TEXT);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
 
@@ -39,6 +40,20 @@ class Store:
         return self.conn.execute(
             "SELECT started_at, fingerprint, status FROM task_runs WHERE task=? ORDER BY id DESC LIMIT 1", (task,)
         ).fetchone()
+
+    def last_result(self, task: str, fingerprint: str) -> str:
+        row = self.conn.execute(
+            "SELECT summary FROM task_runs WHERE task=? AND fingerprint=? AND status IN ('done', 'partial', 'stopped') "
+            "AND summary <> '' ORDER BY id DESC LIMIT 1", (task, fingerprint)).fetchone()
+        return row[0] if row else ""
+
+    def get_meta(self, key: str, default: str = "") -> str:
+        row = self.conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+
+    def set_meta(self, key: str, value: str):
+        self.conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)", (key, value))
+        self.conn.commit()
 
     def cache_get(self, key: str) -> str | None:
         row = self.conn.execute("SELECT response FROM llm_cache WHERE key=?", (key,)).fetchone()

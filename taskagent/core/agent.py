@@ -38,9 +38,10 @@ class Node:
 
 
 class Agent:
-    def __init__(self, llm, tools, cfg: dict | None = None, log=print):
+    def __init__(self, llm, tools, cfg: dict | None = None, log=print, should_stop=None):
         cfg = cfg or {}
         self.llm, self.tools, self.log = llm, tools, log
+        self.should_stop = should_stop or (lambda: False)
         self.max_depth = int(cfg.get("max_depth", 2))
         self.max_steps = int(cfg.get("max_steps", 30))
         self.node_steps = int(cfg.get("max_node_steps", 8))
@@ -48,9 +49,9 @@ class Agent:
         self.obs_chars = int(cfg.get("observation_chars", 2500))
         self.used = 0
 
-    def run(self, goal: str) -> Node:
+    def run(self, goal: str, notes: list[str] | None = None) -> Node:
         self.used = 0
-        return self.solve(str(goal).strip(), 0, [], [])
+        return self.solve(str(goal).strip(), 0, [], list(notes or []))
 
     def _say(self, depth: int, msg: str):
         self.log(f"[agent] {'  ' * depth}{msg}")
@@ -59,6 +60,11 @@ class Agent:
         node = Node(goal, depth)
         self._say(depth, f"> {goal[:200]}")
         while len(node.steps) < self.node_steps and self.used < self.max_steps:
+            if self.should_stop():
+                node.status = "stopped"
+                node.result = next((s.observation for s in reversed(node.steps) if s.action != "error"), "")[:1000]
+                self._say(depth, "! stop requested")
+                return node
             self.used += 1
             try:
                 d = self.llm.json(SYSTEM, self.prompt(node, lineage, notes))
@@ -90,8 +96,8 @@ class Agent:
             return
         subs, done = subs[: self.max_subtasks], []
         for s in subs:
-            if self.used >= self.max_steps:
-                done.append(f"- {s} [skipped]: step budget exhausted")
+            if self.used >= self.max_steps or self.should_stop():
+                done.append(f"- {s} [skipped]: {'stopped' if self.should_stop() else 'step budget exhausted'}")
                 continue
             child = self.solve(s, node.depth + 1, lineage + [node.goal], notes + done)
             node.children.append(child)
@@ -108,14 +114,16 @@ class Agent:
         node.steps.append(Step("tool", detail, obs[: self.obs_chars]))
 
     def wrap_up(self, node: Node, lineage: list[str], notes: list[str]) -> Node:
+        stopped = self.should_stop()
         try:
-            d = self.llm.json(FINISH_SYSTEM, self.prompt(node, lineage, notes, final=True))
-            node.result = str(d.get("result") or "").strip() if isinstance(d, dict) else ""
+            if not stopped:
+                d = self.llm.json(FINISH_SYSTEM, self.prompt(node, lineage, notes, final=True))
+                node.result = str(d.get("result") or "").strip() if isinstance(d, dict) else ""
         except Exception as e:
             self._say(node.depth, f"! wrap-up failed: {type(e).__name__}: {e}"[:200])
         if not node.result:
             node.result = next((s.observation for s in reversed(node.steps) if s.action != "error"), "")[:1000]
-        node.status = "partial"
+        node.status = "stopped" if stopped else "partial"
         self._say(node.depth, f"~ {node.result[:200]}")
         return node
 
@@ -124,7 +132,7 @@ class Agent:
         if lineage:
             parts.append("PARENT GOALS (context only): " + " > ".join(g[:150] for g in lineage))
         if notes:
-            parts.append("RESULTS OF EARLIER SUBTASKS:\n" + "\n".join(n[:600] for n in notes[-6:]))
+            parts.append("NOTES (earlier results and context):\n" + "\n".join(n[:600] for n in notes[-8:]))
         if not final:
             parts.append("TOOLS:\n" + self.tools.describe())
             parts.append("SPLIT: " + (f"allowed (2-{self.max_subtasks} subtasks)" if node.depth < self.max_depth

@@ -23,8 +23,17 @@ agent:
   max_node_steps: 8
   max_subtasks: 4
   observation_chars: 2500
-  tools: [web_search, open_page, http_get, read_file, write_file, list_files]
+  tools: [web_search, open_page, http_get, read_file, write_file, list_files, remember, recall]
   skills: []
+
+memory:
+  enabled: true
+  path: data/memory
+  collection: memory
+  embedding_model: ""
+  auto_store: true
+  auto_recall: 3
+  auto_recall_min_score: 0.3
 
 paths:
   db: data/agent.db

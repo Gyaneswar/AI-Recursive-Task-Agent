@@ -1,3 +1,4 @@
+import uuid
 from collections import Counter
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -8,13 +9,16 @@ from taskagent import skills
 from taskagent.__main__ import parse_params, select
 from taskagent.config import load_config
 from taskagent.core.agent import FINISH_SYSTEM, Agent
+from taskagent.core.context import Context
 from taskagent.core.llm import LLM
-from taskagent.core.scheduler import fingerprint, is_due, run_task
+from taskagent.core.memory import Memory, chunks, format_hits, ingest
+from taskagent.core.scheduler import fingerprint, in_window, is_due, run_task
 from taskagent.core.store import Store
 from taskagent.core.tools import Tool, Toolbox, make_toolbox
 from taskagent.core.web import BrowserSearch, html_to_text, result_url
 from taskagent.skills.base import Skill
 from taskagent.skills.jobs import JobsSkill, runner
+from taskagent.skills.jobs.models import Job
 
 QUIET = lambda msg: None
 
@@ -175,7 +179,8 @@ def test_run_task_records_skill_goal_and_errors(tmp_path):
         if name == "bad":
             raise RuntimeError("broken")
         return f"{name}:{params}"
-    ctx = SimpleNamespace(store=store, llm=llm, cfg={"agent": {"tools": []}}, workspace=tmp_path, run_skill=run_skill)
+    ctx = SimpleNamespace(store=store, llm=llm, cfg={"agent": {"tools": []}}, workspace=tmp_path, run_skill=run_skill,
+                          memory=None, current_task=None, should_stop=lambda: False)
     assert run_task(ctx, {"name": "s", "skill": "jobs", "params": {"x": 1}}, QUIET) == ("done", "jobs:{'x': 1}")
     assert run_task(ctx, {"name": "b", "skill": "bad"}, QUIET) == ("error", "RuntimeError: broken")
     assert run_task(ctx, {"name": "g", "goal": "say hi", "output": "out/hi.md"}, QUIET) == ("done", "hi!")
@@ -197,8 +202,10 @@ def test_load_config_tasks_file_and_validation(tmp_path):
 def test_cli_select_and_params():
     cfg = {"tasks": [{"name": "jobs", "skill": "jobs", "params": {"sources": ["web"]}},
                      {"name": "off", "goal": "g", "enabled": False}]}
-    args = lambda **kw: SimpleNamespace(**{"goal": None, "task": None, "param": None, **kw})
+    args = lambda **kw: SimpleNamespace(**{"goal": None, "task": None, "param": None, "continuous": False, **kw})
     assert [t["name"] for t in select(cfg, args())] == ["jobs"]
+    assert select(cfg, args(task=["jobs"], continuous=True))[0]["continuous"] is True
+    assert select(cfg, args(goal="g", continuous=True)) == [{"name": "adhoc", "goal": "g", "continuous": True}]
     assert [t["name"] for t in select(cfg, args(task=["off"]))] == ["off"]
     assert select(cfg, args(goal="hello")) == [{"name": "adhoc", "goal": "hello"}]
     picked = select(cfg, args(param=["discover_only=true", "sources=[linkedin]"]))
@@ -238,3 +245,149 @@ def test_jobs_skill_wraps_runner(monkeypatch):
     assert seen == {"path": "base/jobs.yaml", "cfg": {"dry_run": True}, "sources": ["web"], "discover_only": True}
     with pytest.raises(ValueError):
         JobsSkill(ctx).run({"sources": ["nope"]})
+
+
+def test_agent_stops_gracefully_and_uses_initial_notes():
+    llm = ScriptLLM({"g": [{"action": "tool", "tool": "echo", "args": {"text": "1"}},
+                           {"action": "tool", "tool": "echo", "args": {"text": "2"}}]})
+    calls = []
+    node = Agent(llm, echo_box(calls), {}, QUIET, should_stop=lambda: bool(calls)).run("g", ["remembered fact"])
+    assert (node.status, node.result, calls, len(llm.calls)) == ("stopped", "echo:1", ["1"], 1)
+    assert "NOTES (earlier results and context):\nremembered fact" in llm.calls[0][2]
+
+    llm = ScriptLLM({"root": [{"action": "split", "subtasks": ["A", "B"]}],
+                     "A": [{"action": "tool", "tool": "echo", "args": {"text": "a"}}]})
+    calls = []
+    node = Agent(llm, echo_box(calls), {}, QUIET, should_stop=lambda: bool(calls)).run("root")
+    assert node.status == "stopped" and [c.status for c in node.children] == ["stopped"]
+    assert "B [skipped]: stopped" in node.steps[0].observation
+    assert all(system != FINISH_SYSTEM for _, system, _ in llm.calls)
+
+
+def test_scheduler_continuous_and_active_hours():
+    now = datetime(2026, 1, 1, 12, 0)
+    task = {"name": "c", "goal": "g", "continuous": True}
+    assert is_due(task, (now.isoformat(), fingerprint(task), "done"), now)
+    assert not is_due({**task, "active_hours": "13:00-18:00"}, None, now)
+    assert in_window({"active_hours": "09:00-18:00"}, now) and in_window({}, now)
+    assert in_window({"active_hours": "22:00-06:00"}, datetime(2026, 1, 1, 23, 30))
+    assert in_window({"active_hours": "22:00-06:00"}, datetime(2026, 1, 2, 5, 59))
+    assert not in_window({"active_hours": "22:00-06:00"}, now)
+
+
+def test_context_stop_and_pause_are_shared_through_the_store(tmp_path):
+    cfg = {"llm": {"base_url": "http://x", "model": "m"}, "paths": {"db": str(tmp_path / "a.db")}}
+    daemon, cli = Context(cfg), Context(cfg)
+    daemon.store.set_meta("stop_at", "2000-01-01T00:00:00")
+    assert not daemon.stop_requested() and not daemon.should_stop() and daemon.memory is None
+    cli.set_paused(["jobs"])
+    daemon.current_task = "jobs"
+    assert daemon.paused() == {"jobs"} and daemon.should_stop()
+    daemon.current_task = "other"
+    assert not daemon.should_stop()
+    cli.set_paused(["jobs"], False)
+    daemon.current_task = "jobs"
+    assert not daemon.should_stop()
+    cli.request_stop()
+    assert daemon.stop_requested() and daemon.should_stop()
+
+
+class FakeMemory:
+    def __init__(self):
+        self.items = []
+
+    def add(self, text, **meta):
+        self.items.append((text, meta))
+        return f"m{len(self.items)}"
+
+    def search(self, query, k=5):
+        return [{"id": f"m{i + 1}", "text": t, "meta": m, "score": round(0.9 - 0.5 * i, 2)}
+                for i, (t, m) in enumerate(self.items[:k])]
+
+
+def test_run_task_continuity_memory_and_stop(tmp_path):
+    store, mem = Store(":memory:"), FakeMemory()
+    mem.add("user likes concise answers", source="user")
+    llm = ScriptLLM({"watch": [{"action": "finish", "result": "found A"}]})
+    ctx = SimpleNamespace(store=store, llm=llm, cfg={"agent": {"tools": ["recall"]}, "memory": {"auto_recall": 2}},
+                          workspace=tmp_path, memory=mem, current_task=None, should_stop=lambda: False)
+    task = {"name": "w", "goal": "watch", "continuous": True}
+    assert run_task(ctx, task, QUIET) == ("done", "found A")
+    first = llm.calls[0][2]
+    assert "memory [0.90]: user likes concise answers" in first and "previous run" not in first
+    assert "- recall(query, k)" in first and "- remember(" not in first
+    assert mem.items[1] == ("Task 'w' goal: watch\nResult (done): found A", {"source": "task", "task": "w"})
+
+    run_task(ctx, task, QUIET)
+    second = llm.calls[1][2]
+    assert "previous run of this task (continue from it, do not redo it): found A" in second
+    assert second.count("memory [") == 1
+
+    run_task(ctx, {**task, "output": "w.md"}, QUIET)
+    assert "previous run" not in llm.calls[2][2]
+
+    ctx.should_stop, ctx.run_skill = lambda: True, lambda name, params: "partial work"
+    assert run_task(ctx, {"name": "s", "skill": "x"}, QUIET) == ("stopped", "partial work")
+    assert ctx.current_task is None
+
+
+def test_memory_tools_with_toolbox(tmp_path):
+    mem = FakeMemory()
+    ctx = SimpleNamespace(workspace=tmp_path, current_task="t1")
+    box = make_toolbox(ctx, {"tools": ["remember", "recall"]}, mem)
+    assert set(box.tools) == {"remember", "recall"}
+    assert box.call("remember", {"text": "Acme hires worldwide", "tags": "jobs"}) == "stored memory m1"
+    assert mem.items[0] == ("Acme hires worldwide", {"source": "agent", "task": "t1", "tags": "jobs"})
+    assert box.call("recall", {"query": "acme"}) == "- [0.90, task=t1, source=agent, tags=jobs] Acme hires worldwide"
+    assert "remember" not in make_toolbox(ctx, {}).tools
+    assert format_hits([]) == "no memories found"
+
+
+def test_chunks():
+    assert chunks("a\n\nb", 10) == ["a\n\nb"]
+    assert chunks("x" * 25, 10) == ["x" * 10, "x" * 10, "x" * 5]
+    assert chunks("aaaa\n\nbbbb\n\ncccc", 10) == ["aaaa\n\nbbbb", "cccc"]
+    assert chunks("", 10) == []
+
+
+def test_memory_chroma_roundtrip_and_ingest(tmp_path):
+    chromadb = pytest.importorskip("chromadb")
+    from chromadb.config import Settings
+    vocab = ["java", "agent", "pasta", "cook", "remote", "job"]
+    embed = lambda texts: [[float(t.lower().count(w)) + 0.01 for w in vocab] for t in texts]
+    client = chromadb.EphemeralClient(settings=Settings(anonymized_telemetry=False))
+    mem = Memory(collection=f"t-{uuid.uuid4().hex[:8]}", embed=embed, client=client)
+    assert mem.search("java") == []
+    mid = mem.add("Java agent frameworks list", task="t")
+    mem.add("How to cook pasta")
+    assert mem.add("Java agent frameworks list", task="t") == mid and mem.count() == 2
+    hits = mem.search("java agent", 5)
+    assert [h["text"] for h in hits] == ["Java agent frameworks list", "How to cook pasta"]
+    assert hits[0]["meta"]["task"] == "t" and "created_at" in hits[0]["meta"] and hits[0]["score"] > hits[1]["score"]
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "a.md").write_text("Remote job notes\n\nJava remote job in India", encoding="utf-8")
+    (tmp_path / "docs" / "skip.bin").write_bytes(b"\x00")
+    assert ingest(mem, tmp_path / "docs") == 1 and mem.count() == 3
+    assert mem.search("remote job", 1)[0]["meta"]["file"].endswith("a.md")
+
+
+def test_jobs_runner_stops_between_jobs(tmp_path, monkeypatch):
+    class FakeAdapter:
+        def __init__(self, cfg, profile, llm, driver):
+            pass
+
+        def discover(self):
+            for i in range(3):
+                yield Job(id=f"f:{i}", source="fake", company=f"C{i}", title="Backend Engineer", url="u")
+
+    scored = []
+
+    class LLMStub:
+        def json(self, system, user):
+            scored.append(user)
+            return {"score": 90, "reasons": ["fit"], "remote_scope": "worldwide", "pay_currency": "USD"}
+    monkeypatch.setitem(runner.ADAPTERS, "fake", FakeAdapter)
+    ctx = SimpleNamespace(llm=LLMStub(), should_stop=lambda: bool(scored))
+    cfg = {"paths": {"db": str(tmp_path / "j.db")}, "thresholds": {"min_match_score": 70},
+           "limits": {"max_applications_per_run": 5, "delay_seconds": [0, 0]}, "filters": {}}
+    assert runner.run(ctx, cfg, {}, ["fake"], discover_only=True) == Counter({"matched": 1, "stopped": 1})

@@ -17,3 +17,11 @@ tasks:
     output: reports/java-agents-summary.md
     agent:
       max_steps: 25
+
+  - name: example-watch
+    enabled: false
+    goal: >
+      Check https://news.ycombinator.com for new posts about Java or LLM agents that are not in memory yet.
+      Remember each new one (title, URL, one-line summary) and append it to reports/hn-watch.md.
+    continuous: true
+    active_hours: "09:00-23:00"
