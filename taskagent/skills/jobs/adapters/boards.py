@@ -3,11 +3,10 @@ from urllib.parse import quote, unquote
 
 import requests
 
-from ..models import Job
-from .base import html_to_text
+from taskagent.core.web import UA, html_to_text
 
-UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/130 Safari/537.36"}
+from ..models import Job
+
 APIS = {
     "greenhouse": "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true",
     "lever": "https://api.lever.co/v0/postings/{slug}?mode=json",

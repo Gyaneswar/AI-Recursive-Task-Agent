@@ -1,4 +1,3 @@
-import html
 import re
 import time
 from abc import ABC, abstractmethod
@@ -6,7 +5,9 @@ from typing import Iterable
 
 from selenium.webdriver.common.by import By
 
-from ..browser import screenshot
+from taskagent.core.browser import screenshot
+from taskagent.core.web import html_to_text
+
 from ..forms import _click, fill_form
 from ..models import ApplyResult, Job
 
@@ -24,13 +25,6 @@ EXTERNAL_FORMS = {
 
 def external_form_for(url: str):
     return next((v for domain, v in EXTERNAL_FORMS.items() if domain in (url or "")), None)
-
-
-def html_to_text(s: str) -> str:
-    s = html.unescape(html.unescape(s or ""))
-    s = re.sub(r"<(br|/p|/li|/h\d)[^>]*>", "\n", s, flags=re.I)
-    s = re.sub(r"<[^>]+>", " ", s)
-    return re.sub(r"[ \t]+", " ", s).strip()
 
 
 class Adapter(ABC):

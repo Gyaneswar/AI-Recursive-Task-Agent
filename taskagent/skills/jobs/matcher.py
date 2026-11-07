@@ -2,7 +2,8 @@ import json
 import re
 from dataclasses import replace
 
-from .llm import LLM
+from taskagent.core.llm import LLM
+
 from .models import Job, MatchResult
 
 MATCH_SYSTEM = """You are a strict technical recruiter. Compare the candidate profile with the job.

@@ -1,11 +1,11 @@
-from jobbot.adapters.base import external_form_for, html_to_text
-from jobbot.adapters.linkedin import LinkedInAdapter, search_url
-from jobbot.db import DB
-from jobbot.forms import deterministic_value, match_option
-from jobbot.llm import parse_json
-from jobbot.matcher import passes_filters, passes_requirements, worth_scope_search
-from jobbot.models import Job, MatchResult
-from jobbot.websearch import WebSearch
+from taskagent.core.llm import parse_json
+from taskagent.skills.jobs.adapters.base import external_form_for, html_to_text
+from taskagent.skills.jobs.adapters.linkedin import LinkedInAdapter, search_url
+from taskagent.skills.jobs.db import DB
+from taskagent.skills.jobs.forms import deterministic_value, match_option
+from taskagent.skills.jobs.matcher import passes_filters, passes_requirements, worth_scope_search
+from taskagent.skills.jobs.models import Job, MatchResult
+from taskagent.skills.jobs.websearch import WebSearch
 
 PROFILE = {"personal": {"first_name": "Jane", "last_name": "Doe", "email": "a@b.com",
                         "phone": "+91 1", "linkedin": "https://linkedin.com/in/x", "resume_pdf": "C:/r.pdf"}}

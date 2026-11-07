@@ -9,7 +9,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import Select
 
-from .llm import LLM
+from taskagent.core.llm import LLM
+
 from .models import Job
 
 FIELD_JS = r"""

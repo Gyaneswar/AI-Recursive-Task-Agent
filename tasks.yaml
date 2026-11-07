@@ -1,0 +1,19 @@
+tasks:
+  - name: jobs
+    enabled: true
+    skill: jobs
+    every_minutes: 60
+    params:
+      config: jobs.yaml
+      sources: [web, linkedin]
+      discover_only: false
+
+  - name: example-research
+    enabled: false
+    goal: >
+      Find three recently released open-source Java libraries for building LLM agents. For each give the name,
+      URL, latest version and a one-line summary, then save them as a markdown table to reports/java-agents.md.
+    every_minutes: 1440
+    output: reports/java-agents-summary.md
+    agent:
+      max_steps: 25

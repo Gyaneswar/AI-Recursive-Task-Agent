@@ -5,7 +5,8 @@ from urllib.parse import quote, urlencode
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 
-from ..browser import human_delay
+from taskagent.core.browser import human_delay
+
 from ..forms import FillReport, _click, fill_form
 from ..models import ApplyResult, Job
 from .base import Adapter, external_form_for

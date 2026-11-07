@@ -16,4 +16,4 @@ if (-not (Test-Url "http://127.0.0.1:9222/json/version")) {
 Set-Location $root
 New-Item -ItemType Directory -Force "data\logs" | Out-Null
 $log = "data\logs\run_$(Get-Date -Format yyyyMMdd_HHmmss).log"
-& "$root\.venv\Scripts\python.exe" -u -m jobbot @args 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $log
+& "$root\.venv\Scripts\python.exe" -u -m taskagent @args 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $log

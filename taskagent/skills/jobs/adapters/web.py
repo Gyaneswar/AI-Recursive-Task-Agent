@@ -7,7 +7,8 @@ from urllib.parse import quote_plus, urlparse
 import requests
 from selenium.common.exceptions import WebDriverException
 
-from ..browser import human_delay
+from taskagent.core.browser import human_delay
+
 from ..db import DB
 from ..forms import _click
 from ..models import ApplyResult, Job

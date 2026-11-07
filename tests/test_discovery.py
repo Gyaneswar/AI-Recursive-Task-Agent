@@ -1,8 +1,8 @@
-from jobbot.adapters import web
-from jobbot.adapters.boards import _ashby, _lever, find_ats, parse_ats_url, slug_candidates
-from jobbot.adapters.feeds import regions, remote_geo
-from jobbot.db import DB
-from jobbot.models import ApplyResult, Job
+from taskagent.skills.jobs.adapters import web
+from taskagent.skills.jobs.adapters.boards import _ashby, _lever, find_ats, parse_ats_url, slug_candidates
+from taskagent.skills.jobs.adapters.feeds import regions, remote_geo
+from taskagent.skills.jobs.db import DB
+from taskagent.skills.jobs.models import ApplyResult, Job
 
 ELIGIBLE = ["india", "asia", "apac"]
 

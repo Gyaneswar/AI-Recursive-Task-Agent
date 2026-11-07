@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 
@@ -17,7 +18,7 @@ def parse_json(text: str) -> dict:
 
 
 class LLM:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, cache=None):
         self.base_url = cfg["base_url"].rstrip("/")
         self.model = cfg["model"]
         self.api_key = cfg.get("api_key", "local")
@@ -25,6 +26,8 @@ class LLM:
         self.timeout = cfg.get("timeout", 180)
         self.json_mode = cfg.get("json_mode", True)
         self.reasoning_effort = cfg.get("reasoning_effort")
+        self.cache = cache
+        self.session = requests.Session()
 
     def chat(self, system: str, user: str) -> str:
         body = {
@@ -36,7 +39,7 @@ class LLM:
             body["response_format"] = {"type": "json_object"}
         if self.reasoning_effort:
             body["reasoning_effort"] = self.reasoning_effort
-        r = requests.post(
+        r = self.session.post(
             f"{self.base_url}/chat/completions",
             json=body,
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -46,4 +49,16 @@ class LLM:
         return r.json()["choices"][0]["message"]["content"]
 
     def json(self, system: str, user: str) -> dict:
-        return parse_json(self.chat(system + "\nRespond with a single JSON object only.", user))
+        system += "\nRespond with a single JSON object only."
+        key = hashlib.sha256(json.dumps([self.model, system, user]).encode()).hexdigest() if self.cache else None
+        cached = self.cache.cache_get(key) if key else None
+        if cached is not None:
+            try:
+                return parse_json(cached)
+            except ValueError:
+                pass
+        text = self.chat(system, user)
+        data = parse_json(text)
+        if key:
+            self.cache.cache_put(key, text)
+        return data
