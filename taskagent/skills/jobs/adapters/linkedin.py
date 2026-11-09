@@ -5,7 +5,7 @@ from urllib.parse import quote, urlencode
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 
-from taskagent.core.browser import human_delay
+from taskagent.core.browser import close_tab, human_delay
 
 from ..forms import FillReport, _click, fill_form
 from ..models import ApplyResult, Job
@@ -262,10 +262,10 @@ class LinkedInAdapter(Adapter):
         if not new:
             return driver.current_url if "linkedin.com" not in driver.current_url else ""
         driver.switch_to.window(new[0])
-        url = driver.current_url
-        driver.close()
-        driver.switch_to.window(main)
-        return url
+        try:
+            return driver.current_url
+        finally:
+            close_tab(driver, main)
 
     def apply(self, driver, job: Job) -> ApplyResult:
         jid = job.id.split(":", 1)[-1]
@@ -276,29 +276,28 @@ class LinkedInAdapter(Adapter):
             job.apply_url = self.external_apply_url(driver)
             spec = external_form_for(job.apply_url)
             if not spec:
-                return ApplyResult("needs_manual", "external apply (unsupported site)")
+                return self.leave_for_review(driver, job, "external apply (unsupported site)", job.apply_url)
             return self.apply_form_page(driver, job, job.apply_url, *spec)
 
         btn = driver.execute_script(EASY_BTN_JS, jid)
         if btn is None:
-            return ApplyResult("needs_manual", "easy apply button not found", self._shot(driver, job))
+            return self.leave_for_review(driver, job, "easy apply button not found")
         _click(driver, btn)
         total = FillReport()
         for _ in range(12):
             modal = self._wait_step(driver)
             if modal is None:
-                return ApplyResult("needs_manual", "easy apply modal not found", self._shot(driver, job))
+                return self.leave_for_review(driver, job, "easy apply modal not found")
             step = fill_form(driver, self.llm, self.profile, job, root=modal, upload_files=False)
             total.unresolved += step.unresolved
             total.min_confidence = min(total.min_confidence, step.min_confidence)
             name, btn = self._step_button(modal)
             if name is None:
-                res = ApplyResult("needs_manual", "no next/submit button", self._shot(driver, job))
-                self._discard(driver)
-                return res
+                return self.leave_for_review(driver, job, "no next/submit button")
             blocked = self.gate(driver, job, total, final=(name == "submit"))
             if blocked:
-                self._discard(driver)
+                if blocked.status == "dry_run":
+                    self._discard(driver)
                 return blocked
             if name == "submit":
                 driver.execute_script(UNFOLLOW_JS, modal)
@@ -308,16 +307,13 @@ class LinkedInAdapter(Adapter):
             if name == "submit":
                 time.sleep(3)
                 body = driver.find_element(By.TAG_NAME, "body").text
+                if not SENT_RE.search(body):
+                    return self.leave_for_review(driver, job, "submit not confirmed")
                 for b in driver.find_elements(By.CSS_SELECTOR, "button[aria-label='Dismiss']"):
                     b.click()
                     break
-                if SENT_RE.search(body):
-                    return ApplyResult("submitted")
-                return ApplyResult("needs_manual", "submit not confirmed", self._shot(driver, job))
+                return ApplyResult("submitted")
             modal = self._modal(driver)
             if modal and [e for e in modal.find_elements(By.CSS_SELECTOR, "[aria-invalid='true']") if e.is_displayed()]:
-                res = ApplyResult("needs_manual", "validation error in easy apply", self._shot(driver, job))
-                self._discard(driver)
-                return res
-        self._discard(driver)
-        return ApplyResult("needs_manual", "too many easy apply steps", self._shot(driver, job))
+                return self.leave_for_review(driver, job, "validation error in easy apply")
+        return self.leave_for_review(driver, job, "too many easy apply steps")

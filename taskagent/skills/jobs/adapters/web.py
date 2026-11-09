@@ -7,7 +7,7 @@ from urllib.parse import quote_plus, urlparse
 import requests
 from selenium.common.exceptions import WebDriverException
 
-from taskagent.core.browser import human_delay
+from taskagent.core.browser import close_tab, human_delay
 
 from ..db import DB
 from ..forms import _click
@@ -71,11 +71,13 @@ def resolve_apply_url(driver, url: str, wait: float = 10) -> str:
         new = [h for h in driver.window_handles if h not in handles]
         if new:
             driver.switch_to.window(new[0])
-            while time.time() < end and urlparse(driver.current_url).netloc in ("", host):
-                time.sleep(0.5)
-            final = driver.current_url
-            driver.close()
-            driver.switch_to.window(main)
+            final = ""
+            try:
+                while time.time() < end and urlparse(driver.current_url).netloc in ("", host):
+                    time.sleep(0.5)
+                final = driver.current_url
+            finally:
+                close_tab(driver, main)
             return final if urlparse(final).netloc not in ("", host) else ""
         if urlparse(driver.current_url).netloc not in ("", host):
             time.sleep(1)
@@ -188,10 +190,12 @@ class WebAdapter(Adapter):
         if not external_form_for(url):
             url = resolve_apply_url(driver, job.url) if job.url else ""
             if not url:
-                return ApplyResult("needs_manual", "apply link not found", self._shot(driver, job))
+                return (self.leave_for_review(driver, job, "apply link not found") if job.url
+                        else ApplyResult("needs_manual", "apply link not found"))
             job.apply_url = url
             self.register(find_ats(url), "resolved")
         spec = external_form_for(url)
         if not spec:
-            return ApplyResult("needs_manual", f"external apply (unsupported site: {urlparse(url).netloc or url[:60]})")
+            site = urlparse(url).netloc or url[:60]
+            return self.leave_for_review(driver, job, f"external apply (unsupported site: {site})", url)
         return self.apply_form_page(driver, job, url, *spec)

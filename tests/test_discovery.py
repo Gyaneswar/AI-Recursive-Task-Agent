@@ -123,6 +123,8 @@ def test_web_apply_routing(tmp_path, monkeypatch):
     calls = []
     a.apply_form_page = lambda driver, job, url, form, submit: calls.append(url) or ApplyResult("dry_run")
     a._shot = lambda driver, job: ""
+    reviewed = []
+    a.leave_for_review = lambda driver, job, reason, url="": reviewed.append(url) or ApplyResult("needs_manual", reason)
     direct = Job(id="gh:x:1", source="greenhouse", company="x", title="t", url="u",
                  apply_url="https://job-boards.greenhouse.io/embed/job_app?for=x&token=1")
     assert a.apply(None, direct).status == "dry_run" and calls == [direct.apply_url]
@@ -135,6 +137,7 @@ def test_web_apply_routing(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "resolve_apply_url", lambda d, u: "https://careers.example.com/job/1")
     res = a.apply(None, _feed_job(6, "Backend Engineer"))
     assert res.status == "needs_manual" and "careers.example.com" in res.reason
+    assert reviewed == ["https://careers.example.com/job/1"]
 
     monkeypatch.setattr(web, "resolve_apply_url", lambda d, u: "")
     assert a.apply(None, _feed_job(7, "Backend Engineer")).reason == "apply link not found"

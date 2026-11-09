@@ -34,6 +34,14 @@ def ensure_driver(cfg: dict, driver=None):
     return attach(cfg.get("debugger_address", "127.0.0.1:9222"), cfg.get("kind", "chrome"), cfg.get("window", "taskagent"))
 
 
+def close_tab(driver, back_to: str):
+    try:
+        driver.close()
+    except WebDriverException:
+        pass
+    driver.switch_to.window(back_to)
+
+
 def human_delay(bounds: list[int] | tuple[int, int]):
     time.sleep(random.uniform(*bounds))
 

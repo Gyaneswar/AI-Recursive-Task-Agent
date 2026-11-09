@@ -1,8 +1,11 @@
+from selenium.common.exceptions import WebDriverException
+
 from taskagent.core.llm import parse_json
+from taskagent.skills.jobs.adapters import base, web
 from taskagent.skills.jobs.adapters.base import external_form_for, html_to_text
 from taskagent.skills.jobs.adapters.linkedin import LinkedInAdapter, search_url
 from taskagent.skills.jobs.db import DB
-from taskagent.skills.jobs.forms import deterministic_value, match_option
+from taskagent.skills.jobs.forms import FillReport, deterministic_value, match_option
 from taskagent.skills.jobs.matcher import passes_filters, passes_requirements, worth_scope_search
 from taskagent.skills.jobs.models import Job, MatchResult
 from taskagent.skills.jobs.websearch import WebSearch
@@ -138,6 +141,93 @@ def test_linkedin_remote_only_skips_onsite_and_hybrid_cards():
     assert opened == ["2", "4"]
 
 
+class FakeTabs:
+    def __init__(self):
+        self.names, self.cur, self.switch_to, self.current_url, self.got = ["taskagent"], 0, self, "", []
+
+    def execute_script(self, js, *args):
+        if args:
+            self.names[self.cur] = args[0]
+            return None
+        name, self.names[self.cur] = self.names[self.cur], ""
+        return name
+
+    def new_window(self, kind):
+        self.names.append("")
+        self.cur = len(self.names) - 1
+
+    def get(self, url):
+        self.got.append(url)
+
+
+def review_adapter(d):
+    a = LinkedInAdapter({"thresholds": {"min_answer_confidence": 0.75}}, {}, None, d)
+    a._shot = lambda driver, j: "shot.png"
+    return a
+
+
+def test_leave_for_review_keeps_tab_and_moves_bot_to_new_tab(monkeypatch):
+    monkeypatch.setattr(base.time, "sleep", lambda s: None)
+    d = FakeTabs()
+    res = review_adapter(d).leave_for_review(d, job(), "captcha")
+    assert (res.status, res.screenshot) == ("needs_manual", "shot.png")
+    assert res.reason.startswith("captcha") and "left open" in res.reason
+    assert d.names == ["", "taskagent"] and d.cur == 1 and d.got == []
+    d = FakeTabs()
+    review_adapter(d).leave_for_review(d, job(), "external apply", "https://jobs.example/apply")
+    assert d.got == ["https://jobs.example/apply"] and d.names == ["", "taskagent"]
+    d = FakeTabs()
+    review_adapter(d).leave_for_review(d, job(), "external apply", "mailto:jobs@example.com")
+    assert d.got == []
+
+
+def test_gate_leaves_stuck_forms_open_for_review():
+    d = FakeTabs()
+    res = review_adapter(d).gate(d, job(), FillReport(unresolved=["Country*"]))
+    assert res.status == "needs_manual" and res.reason.startswith("unresolved: Country*") and "left open" in res.reason
+    assert d.names == ["", "taskagent"]
+    d = FakeTabs()
+    res = review_adapter(d).gate(d, job(), FillReport(min_confidence=0.2))
+    assert res.reason.startswith("low confidence 0.20") and d.cur == 1
+    d = FakeTabs()
+    assert review_adapter(d).gate(d, job(), FillReport()).status == "dry_run" and d.cur == 0
+
+
+def test_resolve_apply_url_returns_to_main_tab_when_close_fails(monkeypatch):
+    class El:
+        def get_attribute(self, name):
+            return ""
+
+        def click(self):
+            d.handles.append("new")
+
+    class D:
+        def __init__(self):
+            self.handles, self.cur, self.switch_to = ["main"], "main", self
+            self.urls = {"main": "https://board.example/job", "new": "https://jobs.lever.co/x/1/apply"}
+
+        window_handles = property(lambda s: list(s.handles))
+        current_window_handle = property(lambda s: s.cur)
+        current_url = property(lambda s: s.urls[s.cur])
+
+        def get(self, url):
+            pass
+
+        def execute_script(self, js, *args):
+            return El() if js == web.APPLY_JS else None
+
+        def window(self, handle):
+            self.cur = handle
+
+        def close(self):
+            raise WebDriverException("failed to close window in 20 seconds")
+
+    monkeypatch.setattr(web.time, "sleep", lambda s: None)
+    d = D()
+    assert web.resolve_apply_url(d, "https://board.example/job") == "https://jobs.lever.co/x/1/apply"
+    assert d.cur == "main"
+
+
 def test_deterministic_values():
     f = lambda label, kind="text": {"label": label, "kind": kind}
     assert deterministic_value(f("First Name *"), PROFILE) == "Jane"
@@ -150,6 +240,16 @@ def test_deterministic_values():
     assert deterministic_value({"label": "Attach", "kind": "file", "hint": "resume resume"}, PROFILE) == "C:/r.pdf"
     assert deterministic_value({"label": "Attach", "kind": "file", "hint": "cover_letter "}, PROFILE) is None
     assert deterministic_value(f("Why do you want to join?", "textarea"), PROFILE) is None
+    p = {**PROFILE, "answers": {"how did you hear|hear about": "LinkedIn", r"know.{0,60}anyone": "No"}}
+    assert deterministic_value(f("How did you hear about this opportunity?*"), p) == "LinkedIn"
+    assert deterministic_value(f("How did you hear about us? (LinkedIn, referral, ...)", "select"), p) == "LinkedIn"
+    assert deterministic_value(f("Do you know, or are you related to, anyone at GiveDirectly?*", "radio"), p) == "No"
+    assert deterministic_value(f("How did you hear about us?", "select"), PROFILE) is None
+    assert deterministic_value(f("Resume/CV", "file"), p) == "C:/r.pdf"
+    age = {"answers": {r"(over|above|at least) (the age of )?18\b|\b18 (years|yrs) (of age|old|or older)": "Yes"}}
+    assert deterministic_value(f("Are you over the age of 18? ✱ Yes No", "radio"), age) == "Yes"
+    assert deterministic_value(f("Are you 18 years or older?", "select"), age) == "Yes"
+    assert deterministic_value(f("Do you have 18 years of experience?", "radio"), age) is None
 
 
 def test_match_option():

@@ -2,7 +2,7 @@ profile: profile.yaml
 dry_run: false
 
 thresholds:
-  min_match_score: 70
+  min_match_score: 60
   min_answer_confidence: 0.75
 
 limits:

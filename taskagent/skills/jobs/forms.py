@@ -19,21 +19,31 @@ const pfx = arguments[1] || 'f';
 const out = [], groups = {};
 const vis = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
 const txt = s => (s || '').replace(/\s+/g, ' ').trim();
+const bare = s => (s || '').replace(/\s+/g, '');
+const widen = (node, own) => {
+  let t = txt(node.innerText);
+  for (let k = 0; own && bare(t) === bare(own) && node.parentElement && node.parentElement !== document.body && k < 4; k++) {
+    node = node.parentElement;
+    t = txt(node.innerText);
+  }
+  return t;
+};
 const labelOf = el => {
   if (el.labels && el.labels.length) return txt(el.labels[0].innerText);
   if (el.getAttribute('aria-label')) return txt(el.getAttribute('aria-label'));
   const lb = el.getAttribute('aria-labelledby');
   if (lb) { const t = document.getElementById(lb.split(' ')[0]); if (t) return txt(t.innerText); }
-  const c = el.closest('div,li'); if (c) return txt(c.innerText).slice(0, 200);
+  const own = el.tagName === 'SELECT' ? [...el.options].map(o => o.text).join(' ') : '';
+  const c = el.closest('div,li'); if (c) return widen(c, own).slice(0, 200);
   return txt(el.placeholder || el.name);
 };
 const groupLabel = el => {
   const fs = el.closest('fieldset');
   if (fs && fs.querySelector('legend')) return txt(fs.querySelector('legend').innerText);
+  const sel = `[name="${CSS.escape(el.name)}"]`, all = root.querySelectorAll(sel);
   let p = el.parentElement;
-  const n = root.querySelectorAll(`[name="${CSS.escape(el.name)}"]`).length;
-  while (p && p.querySelectorAll(`[name="${CSS.escape(el.name)}"]`).length < n) p = p.parentElement;
-  return p ? txt(p.innerText).slice(0, 300) : '';
+  while (p && p.querySelectorAll(sel).length < all.length) p = p.parentElement;
+  return p ? widen(p, [...all].map(labelOf).join(' ')).slice(0, 300) : '';
 };
 let i = 0;
 root.querySelectorAll('input, select, textarea').forEach(el => {
@@ -111,6 +121,9 @@ def deterministic_value(field_: dict, profile: dict):
     if field_["kind"] == "file":
         hint = f"{label} {field_.get('hint', '')}".lower()
         return get_path(profile, "personal.resume_pdf") if re.search(r"resume|\bcv\b", hint) else None
+    for pattern, value in (profile.get("answers") or {}).items():
+        if re.search(pattern, label):
+            return str(value)
     if field_["kind"] not in TEXT_KINDS or len(label) > 80:
         return None
     for pattern, path in RULES:

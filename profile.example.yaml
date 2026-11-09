@@ -22,6 +22,11 @@ work_authorization:
   needs_sponsorship_for_jobs_in_india: "no"
   needs_sponsorship_for_jobs_outside_india: "no"
 
+answers:
+  'how did you (hear|find|learn|come across)|where did you (hear|find|see|learn)|hear about (us|this)': LinkedIn
+  '(know|related to|relatives?|friends?).{0,60}(anyone|employee|work(s|ing)? (at|for))': 'No'
+  '(over|above|at least) (the age of )?18\b|\b18 (years|yrs) (of age|old|or older)': 'Yes'
+
 summary: >
   One or two lines summarising your role, years of experience, core stack and past employers.
 
